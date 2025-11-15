@@ -6,6 +6,7 @@ A full-stack AI-powered sales opportunity analysis tool that listens to your dea
 
 - **Frontend**: React + TypeScript + Vite + Tailwind CSS
 - **Backend**: Node.js + TypeScript + Express
+- **AI**: Claude API (Anthropic) for intelligent deal analysis
 - **Speech**: Web Speech API (browser-based transcription)
 - **Runtime**: Single monorepo, perfect for GitHub Codespaces
 
@@ -13,7 +14,7 @@ A full-stack AI-powered sales opportunity analysis tool that listens to your dea
 
 - 🎤 **Voice Recording**: Click-to-record interface with real-time feedback
 - 🗣️ **Live Transcription**: Real-time speech-to-text using Web Speech API
-- 🤖 **AI Analysis**: Rule-based deal analysis (ready for LLM integration)
+- 🤖 **AI Analysis**: Claude-powered intelligent deal analysis with structured insights
 - 📊 **Pipeline Staging**: Automatic classification (Discovery → Qualified → Evaluation → Procurement → Commit)
 - ⚠️ **Risk Assessment**: 0-100% risk scoring with visual indicators
 - ✅ **Insights**: Positives and negatives extraction from deal conversations
@@ -33,20 +34,30 @@ A full-stack AI-powered sales opportunity analysis tool that listens to your dea
    npm install
    ```
 
-3. **Start Development Server**
+3. **Configure API Key**
+   - Create a `.env` file in the root directory
+   - Add your Anthropic API key:
+     ```bash
+     ANTHROPIC_API_KEY=your_api_key_here
+     ```
+   - Get your API key from: https://console.anthropic.com/
+
+4. **Start Development Server**
    ```bash
    npm run dev
    ```
 
    This will start both the backend (port 3001) and frontend (port 5173) concurrently.
 
-4. **Access the Application**
+   **Note:** If you don't set the API key, the app will still run but will return fallback analysis instead of AI-powered insights.
+
+5. **Access the Application**
    - Codespaces will automatically forward ports
    - Look for the **"Ports"** tab in the bottom panel
    - Click the **globe icon** next to port 5173 to open the frontend
    - The URL will look like: `https://your-codespace-name-5173.preview.app.github.dev`
 
-5. **Enable Microphone Access**
+6. **Enable Microphone Access**
    - Your browser will prompt for microphone permissions
    - Click "Allow" to enable voice recording
 
@@ -63,12 +74,20 @@ A full-stack AI-powered sales opportunity analysis tool that listens to your dea
    npm install
    ```
 
-3. **Start Development Server**
+3. **Configure API Key**
+   - Create a `.env` file in the root directory
+   - Add your Anthropic API key:
+     ```bash
+     ANTHROPIC_API_KEY=your_api_key_here
+     ```
+   - Get your API key from: https://console.anthropic.com/
+
+4. **Start Development Server**
    ```bash
    npm run dev
    ```
 
-4. **Access the Application**
+5. **Access the Application**
    - Open your browser to `http://localhost:5173`
 
 ## Available Scripts
@@ -106,21 +125,21 @@ deal-coach/
 
 ### Frontend Flow
 
-1. **User clicks microphone button** → Starts audio recording + Web Speech API
+1. **User clicks microphone button** → Starts Web Speech API for real-time transcription
 2. **Real-time transcription** → Shows live text as you speak
-3. **User clicks stop** → Sends audio blob to backend API
+3. **User clicks stop** → Sends transcript text to backend API
 4. **Display results** → Shows pipeline stage, risk score, insights
 
 ### Backend Flow
 
-1. **Receives audio blob** → POST `/api/analyze-deal`
-2. **Transcription (stubbed)** → Returns hardcoded transcript (ready for Whisper integration)
-3. **Analysis** → Rule-based keyword detection and scoring
-4. **Returns JSON** → Transcript + analysis object
+1. **Receives transcript** → POST `/api/analyze-deal` with JSON body `{ transcript: string }`
+2. **Claude API Call** → Sends transcript to Claude with expert sales coaching prompt
+3. **Analysis** → Claude extracts facts, determines stage, calculates risk, provides insights
+4. **Returns JSON** → Structured analysis with pipeline stage, risk score, positives, negatives
 
 ### Analysis Logic
 
-The `analyzeDeal` function uses keyword detection to extract:
+The `analyzeDeal` function uses Claude AI to:
 
 - **Facts**: Champion, economic buyer, budget, timeline, procurement, legal, competition
 - **Pipeline Stage**: Based on conversation maturity and deal progression
@@ -129,13 +148,13 @@ The `analyzeDeal` function uses keyword detection to extract:
 
 ## Future Enhancements
 
-- [ ] Replace stub transcription with OpenAI Whisper API
-- [ ] Add LLM-based analysis (GPT-4, Claude, etc.)
+- [ ] Add server-side transcription with OpenAI Whisper API (currently using browser Web Speech API)
 - [ ] Store deal history and track changes over time
-- [ ] Add coaching recommendations and next steps
+- [ ] Add coaching recommendations and next steps based on Claude's analysis
 - [ ] Multi-language support
 - [ ] Export reports to PDF/CSV
 - [ ] Team collaboration features
+- [ ] Integration with CRM systems (Salesforce, HubSpot, etc.)
 
 ## API Endpoints
 
@@ -151,11 +170,11 @@ Health check endpoint
 ```
 
 ### `POST /api/analyze-deal`
-Analyze a sales deal from audio recording
+Analyze a sales deal from transcript text
 
 **Request:**
-- `Content-Type: multipart/form-data`
-- `audio`: Audio file (WAV, WebM, etc.)
+- `Content-Type: application/json`
+- Body: `{ "transcript": string }`
 
 **Response:**
 ```json
@@ -174,6 +193,7 @@ Analyze a sales deal from audio recording
       "Budget not confirmed"
     ],
     "extractedFacts": {
+      "accountName": "Acme Corp",
       "hasChampion": true,
       "hasEconomicBuyer": false,
       "hasBudget": false,
@@ -212,6 +232,12 @@ For production, consider using a server-side speech-to-text service like:
 ### CORS errors
 - The Vite proxy is configured to forward `/api` requests to port 3001
 - Ensure both frontend and backend are running
+
+### API key issues
+- If you see "Analysis unavailable - API key not configured", check your `.env` file
+- Make sure `ANTHROPIC_API_KEY` is set in the `.env` file in the root directory
+- Get your API key from: https://console.anthropic.com/
+- Restart the server after adding the API key
 
 ## License
 

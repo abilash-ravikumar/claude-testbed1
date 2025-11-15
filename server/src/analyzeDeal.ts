@@ -1,165 +1,165 @@
-import { DealAnalysis, ExtractedFacts, PipelineStage } from './types';
+import Anthropic from '@anthropic-ai/sdk';
+import { DealAnalysis, PipelineStage } from './types';
 
 /**
- * Analyzes a deal transcript using rule-based keyword detection
+ * Analyzes a deal transcript using Claude AI
  * @param transcript - The transcribed text from the sales call
  * @returns DealAnalysis object with stage, risk, and insights
  */
-export function analyzeDeal(transcript: string): DealAnalysis {
-  const lowerTranscript = transcript.toLowerCase();
+export async function analyzeDeal(transcript: string): Promise<DealAnalysis> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
 
-  // Extract facts from transcript
-  const facts: ExtractedFacts = {
-    hasChampion: hasKeywords(lowerTranscript, ['champion', 'internal advocate', 'supporter', 'pushing for']),
-    hasEconomicBuyer: hasKeywords(lowerTranscript, ['economic buyer', 'decision maker', 'ceo', 'cfo', 'vp', 'executive', 'final decision', 'sign off']),
-    hasBudget: hasKeywords(lowerTranscript, ['budget', 'allocated', 'funding', 'approved', 'price', 'cost']),
-    hasTimeline: hasKeywords(lowerTranscript, ['timeline', 'deadline', 'by end of', 'quarter', 'month', 'urgent', 'asap']),
-    procurementInvolved: hasKeywords(lowerTranscript, ['procurement', 'purchasing', 'vendor', 'contract review']),
-    legalInvolved: hasKeywords(lowerTranscript, ['legal', 'contract', 'terms', 'compliance', 'security review']),
-    competitionPresent: hasKeywords(lowerTranscript, ['competitor', 'alternative', 'evaluating others', 'other vendors', 'comparing'])
-  };
-
-  // Determine pipeline stage
-  const stage = determinePipelineStage(lowerTranscript, facts);
-
-  // Calculate risk score (0-1, higher = more risk)
-  const riskScore = calculateRiskScore(facts, lowerTranscript);
-
-  // Generate positives and negatives
-  const positives = generatePositives(facts, lowerTranscript);
-  const negatives = generateNegatives(facts, lowerTranscript);
-
-  // Generate summary
-  const summary = generateSummary(stage, riskScore, facts);
-
-  return {
-    pipelineStage: stage,
-    riskScore,
-    summary,
-    positives,
-    negatives,
-    extractedFacts: facts
-  };
-}
-
-function hasKeywords(text: string, keywords: string[]): boolean {
-  return keywords.some(keyword => text.includes(keyword));
-}
-
-function determinePipelineStage(transcript: string, facts: ExtractedFacts): PipelineStage {
-  // COMMIT: Contract signed, legal approved, procurement complete
-  if (hasKeywords(transcript, ['signed', 'contract signed', 'deal closed', 'executed'])) {
-    return 'COMMIT';
+  if (!apiKey) {
+    console.warn('ANTHROPIC_API_KEY not set, returning fallback analysis');
+    return getFallbackAnalysis(transcript);
   }
 
-  // PROCUREMENT: Legal/procurement involved, paperwork stage
-  if (facts.procurementInvolved || facts.legalInvolved) {
-    if (hasKeywords(transcript, ['reviewing', 'red lines', 'negotiating terms'])) {
-      return 'PROCUREMENT';
+  try {
+    const anthropic = new Anthropic({
+      apiKey: apiKey,
+    });
+
+    const systemPrompt = `You are an expert B2B SaaS sales deal coach. Given a transcript of a sales rep describing a deal, you must extract facts and classify the pipeline stage.
+
+Your response MUST be valid JSON matching this exact TypeScript shape:
+
+{
+  "pipelineStage": "DISCOVERY" | "QUALIFIED" | "EVALUATION" | "PROCUREMENT" | "COMMIT",
+  "riskScore": number,  // 0 to 1, where 0 is no risk and 1 is very high risk
+  "summary": string,    // One sentence summarizing the deal status
+  "positives": string[], // Array of positive signals (2-5 items)
+  "negatives": string[], // Array of risk factors or concerns (2-5 items)
+  "extractedFacts": {
+    "accountName": string | null,           // Company/account name if mentioned
+    "hasChampion": boolean,                  // Internal advocate present
+    "hasEconomicBuyer": boolean,             // Decision maker engaged
+    "hasBudget": boolean,                    // Budget confirmed or discussed
+    "hasTimeline": boolean,                  // Clear timeline mentioned
+    "procurementInvolved": boolean,          // Procurement/purchasing involved
+    "legalInvolved": boolean,                // Legal review in process
+    "competitionPresent": boolean            // Competing vendors mentioned
+  }
+}
+
+Pipeline stages:
+- DISCOVERY: Initial conversations, need identification
+- QUALIFIED: Budget, authority, need, timeline (BANT) established
+- EVALUATION: Technical validation, POC, demos
+- PROCUREMENT: Legal/contract review, purchasing involved
+- COMMIT: Deal signed/committed
+
+Respond ONLY with the JSON object, no other text.`;
+
+    const message = await anthropic.messages.create({
+      model: 'claude-3-5-sonnet-20241022',
+      max_tokens: 2000,
+      temperature: 0.3,
+      system: systemPrompt,
+      messages: [
+        {
+          role: 'user',
+          content: `Analyze this sales deal transcript:\n\n${transcript}`,
+        },
+      ],
+    });
+
+    // Extract the text content from Claude's response
+    const content = message.content[0];
+    if (content.type !== 'text') {
+      throw new Error('Unexpected response type from Claude');
     }
+
+    const responseText = content.text;
+
+    // Try to parse JSON from the response
+    let analysisData: any;
+    try {
+      // First try to parse directly
+      analysisData = JSON.parse(responseText);
+    } catch (e) {
+      // If that fails, try to extract JSON from markdown code blocks
+      const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
+      if (jsonMatch) {
+        analysisData = JSON.parse(jsonMatch[1]);
+      } else {
+        // Try to find any JSON object in the response
+        const objectMatch = responseText.match(/\{[\s\S]*\}/);
+        if (objectMatch) {
+          analysisData = JSON.parse(objectMatch[0]);
+        } else {
+          throw new Error('Could not extract JSON from Claude response');
+        }
+      }
+    }
+
+    // Validate and normalize the response
+    const analysis: DealAnalysis = {
+      pipelineStage: validatePipelineStage(analysisData.pipelineStage),
+      riskScore: normalizeRiskScore(analysisData.riskScore),
+      summary: analysisData.summary || 'Deal analysis completed',
+      positives: Array.isArray(analysisData.positives) ? analysisData.positives : [],
+      negatives: Array.isArray(analysisData.negatives) ? analysisData.negatives : [],
+      extractedFacts: {
+        accountName: analysisData.extractedFacts?.accountName || null,
+        hasChampion: !!analysisData.extractedFacts?.hasChampion,
+        hasEconomicBuyer: !!analysisData.extractedFacts?.hasEconomicBuyer,
+        hasBudget: !!analysisData.extractedFacts?.hasBudget,
+        hasTimeline: !!analysisData.extractedFacts?.hasTimeline,
+        procurementInvolved: !!analysisData.extractedFacts?.procurementInvolved,
+        legalInvolved: !!analysisData.extractedFacts?.legalInvolved,
+        competitionPresent: !!analysisData.extractedFacts?.competitionPresent,
+      },
+    };
+
+    return analysis;
+  } catch (error) {
+    console.error('Error calling Claude API:', error);
+    return getFallbackAnalysis(transcript);
+  }
+}
+
+/**
+ * Validates and normalizes pipeline stage values
+ */
+function validatePipelineStage(stage: any): PipelineStage {
+  const validStages: PipelineStage[] = ['DISCOVERY', 'QUALIFIED', 'EVALUATION', 'PROCUREMENT', 'COMMIT'];
+  const upperStage = String(stage).toUpperCase();
+
+  if (validStages.includes(upperStage as PipelineStage)) {
+    return upperStage as PipelineStage;
   }
 
-  // EVALUATION: Technical validation, POC, deep evaluation
-  if (hasKeywords(transcript, ['poc', 'proof of concept', 'trial', 'pilot', 'evaluation', 'testing', 'demo'])) {
-    return 'EVALUATION';
-  }
-
-  // QUALIFIED: Has basic BANT (Budget, Authority, Need, Timeline)
-  const hasBasicQualification = (facts.hasBudget || facts.hasEconomicBuyer) && facts.hasTimeline;
-  if (hasBasicQualification) {
-    return 'QUALIFIED';
-  }
-
-  // Default: DISCOVERY
   return 'DISCOVERY';
 }
 
-function calculateRiskScore(facts: ExtractedFacts, transcript: string): number {
-  let risk = 0.5; // Start at medium risk
-
-  // Reduce risk for positive signals
-  if (facts.hasChampion) risk -= 0.15;
-  if (facts.hasEconomicBuyer) risk -= 0.15;
-  if (facts.hasBudget) risk -= 0.1;
-  if (facts.hasTimeline) risk -= 0.05;
-
-  // Increase risk for negative signals
-  if (!facts.hasChampion) risk += 0.1;
-  if (!facts.hasEconomicBuyer) risk += 0.15;
-  if (facts.competitionPresent) risk += 0.1;
-  if (hasKeywords(transcript, ['budget cut', 'no budget', 'delayed', 'postponed', 'uncertain'])) risk += 0.15;
-  if (hasKeywords(transcript, ['concern', 'worried', 'hesitant', 'pushback', 'resistance'])) risk += 0.1;
-
-  // Clamp between 0 and 1
-  return Math.max(0, Math.min(1, risk));
+/**
+ * Normalizes risk score to 0-1 range
+ */
+function normalizeRiskScore(score: any): number {
+  const num = Number(score);
+  if (isNaN(num)) return 0.5;
+  return Math.max(0, Math.min(1, num));
 }
 
-function generatePositives(facts: ExtractedFacts, transcript: string): string[] {
-  const positives: string[] = [];
-
-  if (facts.hasChampion) {
-    positives.push('Internal champion identified and engaged');
-  }
-  if (facts.hasEconomicBuyer) {
-    positives.push('Economic buyer/decision maker involved');
-  }
-  if (facts.hasBudget) {
-    positives.push('Budget discussed or allocated');
-  }
-  if (facts.hasTimeline) {
-    positives.push('Clear timeline established');
-  }
-  if (hasKeywords(transcript, ['excited', 'enthusiastic', 'perfect fit', 'exactly what we need'])) {
-    positives.push('High enthusiasm and interest expressed');
-  }
-  if (hasKeywords(transcript, ['urgent', 'asap', 'priority', 'critical'])) {
-    positives.push('High urgency and priority');
-  }
-
-  if (positives.length === 0) {
-    positives.push('Initial contact established');
-  }
-
-  return positives;
-}
-
-function generateNegatives(facts: ExtractedFacts, transcript: string): string[] {
-  const negatives: string[] = [];
-
-  if (!facts.hasChampion) {
-    negatives.push('No internal champion identified yet');
-  }
-  if (!facts.hasEconomicBuyer) {
-    negatives.push('Economic buyer not yet engaged');
-  }
-  if (!facts.hasBudget) {
-    negatives.push('Budget not confirmed');
-  }
-  if (!facts.hasTimeline) {
-    negatives.push('No clear timeline established');
-  }
-  if (facts.competitionPresent) {
-    negatives.push('Competition present in the evaluation');
-  }
-  if (hasKeywords(transcript, ['concern', 'worried', 'hesitant'])) {
-    negatives.push('Concerns or hesitation detected');
-  }
-  if (hasKeywords(transcript, ['delayed', 'postponed', 'on hold'])) {
-    negatives.push('Deal timing may be at risk');
-  }
-
-  return negatives;
-}
-
-function generateSummary(stage: PipelineStage, riskScore: number, facts: ExtractedFacts): string {
-  const riskLevel = riskScore < 0.3 ? 'low' : riskScore < 0.7 ? 'medium' : 'high';
-  const stageLabel = stage.toLowerCase().replace('_', ' ');
-
-  if (facts.hasChampion && facts.hasEconomicBuyer) {
-    return `${stage} stage deal with strong stakeholder engagement and ${riskLevel} risk.`;
-  } else if (!facts.hasEconomicBuyer) {
-    return `${stage} stage deal with ${riskLevel} risk; needs executive engagement.`;
-  } else {
-    return `${stage} stage deal with ${riskLevel} risk; continue qualification.`;
-  }
+/**
+ * Returns a safe fallback analysis when API key is missing or API call fails
+ */
+function getFallbackAnalysis(transcript: string): DealAnalysis {
+  return {
+    pipelineStage: 'DISCOVERY',
+    riskScore: 0.5,
+    summary: 'Analysis unavailable - API key not configured',
+    positives: ['Transcript captured successfully'],
+    negatives: ['Unable to perform AI analysis - check API configuration'],
+    extractedFacts: {
+      accountName: null,
+      hasChampion: false,
+      hasEconomicBuyer: false,
+      hasBudget: false,
+      hasTimeline: false,
+      procurementInvolved: false,
+      legalInvolved: false,
+      competitionPresent: false,
+    },
+  };
 }

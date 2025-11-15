@@ -1,6 +1,6 @@
+import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
-import multer from 'multer';
 import { analyzeDeal } from './analyzeDeal';
 
 const app = express();
@@ -10,36 +10,31 @@ const PORT = process.env.PORT || 3001;
 app.use(cors());
 app.use(express.json());
 
-// Configure multer for handling audio file uploads
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
-  },
-});
-
 // Health check endpoint
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Main endpoint: Analyze deal from audio
-app.post('/api/analyze-deal', upload.single('audio'), async (req: Request, res: Response) => {
+// Main endpoint: Analyze deal from transcript
+app.post('/api/analyze-deal', async (req: Request, res: Response) => {
   try {
-    console.log('Received analyze-deal request');
+    const { transcript } = req.body;
 
-    // For now, we're stubbing the transcription
-    // In the future, this will use Whisper or another STT service
-    const stubTranscript = "This is a fake transcript about a deal with a champion and no economic buyer yet. We have a timeline of end of quarter and they're very excited about the solution. There's some concern about budget approval but we have an internal advocate pushing hard for this.";
+    if (!transcript || typeof transcript !== 'string') {
+      return res.status(400).json({
+        error: 'Bad request',
+        message: 'Request body must include a "transcript" string',
+      });
+    }
 
-    console.log('Using stub transcript:', stubTranscript);
+    console.log('Received analyze-deal request with transcript length:', transcript.length);
 
-    // Analyze the deal
-    const analysis = analyzeDeal(stubTranscript);
+    // Analyze the deal using Claude AI
+    const analysis = await analyzeDeal(transcript);
 
     // Return both the transcript and analysis
     res.json({
-      transcript: stubTranscript,
+      transcript,
       analysis,
     });
   } catch (error) {
@@ -55,4 +50,13 @@ app.post('/api/analyze-deal', upload.single('audio'), async (req: Request, res: 
 app.listen(PORT, () => {
   console.log(`🚀 Deal Coach server running on http://localhost:${PORT}`);
   console.log(`📊 API available at http://localhost:${PORT}/api`);
+
+  // Check for API key and warn if missing
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.warn('⚠️  WARNING: ANTHROPIC_API_KEY not set!');
+    console.warn('   Set it in a .env file or environment variable to enable AI analysis.');
+    console.warn('   The app will run but return fallback analysis.');
+  } else {
+    console.log('✅ ANTHROPIC_API_KEY configured');
+  }
 });

@@ -52,8 +52,6 @@ function App() {
   const [analysis, setAnalysis] = useState<DealAnalysis | null>(null);
   const [botMessage, setBotMessage] = useState<string>('Ready to analyze your deal');
 
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
 
   // Initialize Speech Recognition
@@ -100,30 +98,16 @@ function App() {
     }
   }, []);
 
-  const startRecording = async () => {
+  const startRecording = () => {
     try {
       // Reset state
       setTranscript('');
       setFinalTranscript('');
       setAnalysis(null);
-      audioChunksRef.current = [];
 
       // Update UI
       setState('listening');
       setBotMessage('Listening... Tell me about your deal');
-
-      // Start audio recording
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      mediaRecorder.start();
-      mediaRecorderRef.current = mediaRecorder;
 
       // Start speech recognition
       if (recognitionRef.current) {
@@ -136,43 +120,34 @@ function App() {
     }
   };
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
     // Stop speech recognition
     if (recognitionRef.current) {
       recognitionRef.current.stop();
     }
 
-    // Stop media recorder
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+    // Update state
+    setState('processing');
+    setBotMessage('Analyzing your deal...');
 
-      mediaRecorderRef.current.onstop = async () => {
-        // Update state
-        setState('processing');
-        setBotMessage('Analyzing your deal...');
-
-        // Create audio blob
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-
-        // Send to backend
-        await analyzeDeal(audioBlob);
-
-        // Stop all tracks
-        if (mediaRecorderRef.current?.stream) {
-          mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-        }
-      };
-    }
+    // Send transcript to backend for analysis
+    await analyzeDeal(transcript);
   };
 
-  const analyzeDeal = async (audioBlob: Blob) => {
+  const analyzeDeal = async (transcriptText: string) => {
     try {
-      const formData = new FormData();
-      formData.append('audio', audioBlob, 'recording.webm');
+      if (!transcriptText || transcriptText.trim().length === 0) {
+        setBotMessage('No speech detected. Please try again.');
+        setState('idle');
+        return;
+      }
 
       const response = await fetch('/api/analyze-deal', {
         method: 'POST',
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ transcript: transcriptText }),
       });
 
       if (!response.ok) {
@@ -181,9 +156,8 @@ function App() {
 
       const data: AnalyzeResponse = await response.json();
 
-      // Update with final transcript from backend
+      // Update with analysis results
       setFinalTranscript(data.transcript);
-      setTranscript(data.transcript);
       setAnalysis(data.analysis);
       setState('complete');
       setBotMessage('Analysis complete!');

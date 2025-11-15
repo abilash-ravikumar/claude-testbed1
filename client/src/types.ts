@@ -1,6 +1,7 @@
 export type PipelineStage = "DISCOVERY" | "QUALIFIED" | "EVALUATION" | "PROCUREMENT" | "COMMIT";
 
 export interface ExtractedFacts {
+  accountName?: string | null;
   hasChampion?: boolean;
   hasEconomicBuyer?: boolean;
   hasBudget?: boolean;
